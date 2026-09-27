@@ -1,23 +1,54 @@
+
 package com.chatgpt.multisession.ui
 
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -34,6 +65,7 @@ import com.chatgpt.multisession.webview.ChatGPTWebViewClient
 import com.chatgpt.multisession.webview.WebViewProfileManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
 
@@ -42,39 +74,36 @@ class MainActivity : ComponentActivity() {
     private lateinit var downloadHandler: DownloadHandler
     private lateinit var permissionHandler: PermissionHandler
 
-    // WebView cache: maksimal 3 akun aktif
     private val webViewCache = mutableMapOf<String, WebView>()
-    private val MAX_CACHE = 3
+    private val maxCache = 3
 
-    // File chooser
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     private val filePickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
 
-            val uris = if (result.resultCode == RESULT_OK) {
-                result.data?.let { data ->
-                    val clip = data.clipData
+            val uris: Array<Uri> =
+                if (result.resultCode == RESULT_OK) {
+                    val data = result.data
 
-                    if (clip != null) {
-                        Array(clip.itemCount) { i ->
-                            clip.getItemAt(i).uri
+                    if (data?.clipData != null) {
+                        val clipData = data.clipData!!
+                        Array(clipData.itemCount) { index ->
+                            clipData.getItemAt(index).uri
                         }
+                    } else if (data?.data != null) {
+                        arrayOf(data.data!!)
                     } else {
-                        data.data?.let {
-                            arrayOf(it)
-                        } ?: emptyArray()
+                        emptyArray()
                     }
-                } ?: emptyArray()
-            } else {
-                emptyArray()
-            }
+                } else {
+                    emptyArray()
+                }
 
             filePathCallback?.onReceiveValue(uris)
             filePathCallback = null
         }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -87,13 +116,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme(
-                colorScheme = if (
-                    androidx.compose.foundation.isSystemInDarkTheme()
-                ) {
-                    darkColorScheme()
-                } else {
-                    lightColorScheme()
-                }
+                colorScheme =
+                    if (androidx.compose.foundation.isSystemInDarkTheme()) {
+                        darkColorScheme()
+                    } else {
+                        lightColorScheme()
+                    }
             ) {
                 MainScreen()
             }
@@ -102,7 +130,7 @@ class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun MainScreen() {
+    private fun MainScreen() {
 
         val context = LocalContext.current
 
@@ -132,14 +160,12 @@ class MainActivity : ComponentActivity() {
 
         val scope = rememberCoroutineScope()
 
-        // Monitor jaringan
         LaunchedEffect(Unit) {
             networkMonitor.isOnline.collect { online ->
                 isOffline = !online
             }
         }
 
-        // Buat akun pertama otomatis
         LaunchedEffect(accounts) {
             if (accounts.isEmpty()) {
                 repository.addAccount("Personal")
@@ -159,7 +185,6 @@ class MainActivity : ComponentActivity() {
                                 ?: "ChatGPT Multi"
                         )
                     },
-
                     navigationIcon = {
                         IconButton(
                             onClick = {
@@ -167,12 +192,11 @@ class MainActivity : ComponentActivity() {
                             }
                         ) {
                             Icon(
-                                Icons.Default.Menu,
+                                imageVector = Icons.Default.Menu,
                                 contentDescription = "Accounts"
                             )
                         }
                     },
-
                     actions = {
 
                         IconButton(
@@ -181,30 +205,30 @@ class MainActivity : ComponentActivity() {
                             }
                         ) {
                             Icon(
-                                Icons.Default.Refresh,
+                                imageVector = Icons.Default.Refresh,
                                 contentDescription = "Reload"
                             )
                         }
 
-                        var menu by remember {
+                        var menuExpanded by remember {
                             mutableStateOf(false)
                         }
 
                         IconButton(
                             onClick = {
-                                menu = true
+                                menuExpanded = true
                             }
                         ) {
                             Icon(
-                                Icons.Default.MoreVert,
+                                imageVector = Icons.Default.MoreVert,
                                 contentDescription = "More"
                             )
                         }
 
                         DropdownMenu(
-                            expanded = menu,
+                            expanded = menuExpanded,
                             onDismissRequest = {
-                                menu = false
+                                menuExpanded = false
                             }
                         ) {
 
@@ -213,396 +237,10 @@ class MainActivity : ComponentActivity() {
                                     Text("Open in browser")
                                 },
                                 onClick = {
-
-                                    menu = false
+                                    menuExpanded = false
 
                                     currentWebView?.url?.let { url ->
                                         startActivity(
                                             Intent(
                                                 Intent.ACTION_VIEW,
-                                                Uri.parse(url)
-                                            )
-                                        )
-                                    }
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = {
-                                    Text("Clear cache (active)")
-                                },
-                                onClick = {
-
-                                    menu = false
-
-                                    currentWebView?.let {
-                                        WebViewProfileManager
-                                            .clearCacheOnly(it)
-                                    }
-
-                                    Toast.makeText(
-                                        context,
-                                        "Cache cleared",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = {
-                                    Text("Clear session (active)")
-                                },
-                                onClick = {
-
-                                    menu = false
-
-                                    currentWebView?.let {
-                                        WebViewProfileManager
-                                            .clearSessionForAccount(it)
-
-                                        it.loadUrl(
-                                            "https://chatgpt.com/"
-                                        )
-                                    }
-                                }
-                            )
-                        }
-                    }
-                )
-            }
-        ) { padding ->
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-
-                if (activeAccount != null) {
-
-                    val account = activeAccount
-
-                    SwipeAccountSwitcher(
-                        modifier = Modifier.fillMaxSize(),
-
-                        onSwipeLeft = {
-
-                            val idx =
-                                accounts.indexOf(account)
-
-                            if (
-                                idx >= 0 &&
-                                accounts.size > 1
-                            ) {
-
-                                val next =
-                                    accounts[
-                                        (idx + 1) %
-                                            accounts.size
-                                    ]
-
-                                scope.launch {
-
-                                    repository.setActive(
-                                        next.id
-                                    )
-
-                                    switchMessage =
-                                        "Switched to: ${next.displayName}"
-                                }
-                            }
-                        },
-
-                        onSwipeRight = {
-
-                            val idx =
-                                accounts.indexOf(account)
-
-                            if (
-                                idx >= 0 &&
-                                accounts.size > 1
-                            ) {
-
-                                val prev =
-                                    accounts[
-                                        if (idx - 1 < 0) {
-                                            accounts.size - 1
-                                        } else {
-                                            idx - 1
-                                        }
-                                    ]
-
-                                scope.launch {
-
-                                    repository.setActive(
-                                        prev.id
-                                    )
-
-                                    switchMessage =
-                                        "Switched to: ${prev.displayName}"
-                                }
-                            }
-                        }
-                    ) {
-
-                        // Penting:
-                        // hanya SATU AndroidView untuk satu WebView.
-                        key(account.id) {
-
-                            AndroidView(
-                                modifier =
-                                    Modifier.fillMaxSize(),
-
-                                factory = { ctx ->
-
-                                    getOrCreateWebView(
-                                        ctx,
-                                        account
-                                    ).also { wv ->
-
-                                        currentWebView = wv
-
-                                        if (
-                                            wv.url
-                                                .isNullOrEmpty()
-                                        ) {
-                                            wv.loadUrl(
-                                                "https://chatgpt.com/"
-                                            )
-                                        }
-                                    }
-                                },
-
-                                update = { wv ->
-
-                                    currentWebView = wv
-
-                                    if (
-                                        wv.url
-                                            .isNullOrEmpty()
-                                    ) {
-                                        wv.loadUrl(
-                                            "https://chatgpt.com/"
-                                        )
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if (isOffline) {
-
-                    Card(
-                        modifier = Modifier
-                            .align(
-                                androidx.compose.ui.Alignment
-                                    .BottomCenter
-                            )
-                            .padding(16.dp),
-
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor =
-                                    MaterialTheme
-                                        .colorScheme
-                                        .errorContainer
-                            )
-                    ) {
-
-                        Row(
-                            modifier =
-                                Modifier.padding(12.dp),
-
-                            horizontalArrangement =
-                                Arrangement.spacedBy(
-                                    8.dp
-                                )
-                        ) {
-
-                            Text(
-                                text =
-                                    "Offline - check connection",
-
-                                color =
-                                    MaterialTheme
-                                        .colorScheme
-                                        .onErrorContainer
-                            )
-
-                            TextButton(
-                                onClick = {
-                                    currentWebView
-                                        ?.reload()
-                                }
-                            ) {
-                                Text("Retry")
-                            }
-                        }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible =
-                        switchMessage != null,
-
-                    enter =
-                        fadeIn() +
-                            slideInVertically(),
-
-                    exit =
-                        fadeOut() +
-                            slideOutVertically(),
-
-                    modifier = Modifier
-                        .align(
-                            androidx.compose.ui.Alignment
-                                .TopCenter
-                        )
-                        .padding(top = 8.dp)
-                ) {
-
-                    switchMessage?.let { message ->
-
-                        Card(
-                            colors =
-                                CardDefaults.cardColors(
-                                    containerColor =
-                                        MaterialTheme
-                                            .colorScheme
-                                            .secondaryContainer
-                                )
-                        ) {
-
-                            Text(
-                                text = message,
-
-                                modifier =
-                                    Modifier.padding(
-                                        horizontal =
-                                            16.dp,
-                                        vertical =
-                                            8.dp
-                                    )
-                            )
-                        }
-
-                        LaunchedEffect(message) {
-
-                            kotlinx.coroutines.delay(
-                                1500
-                            )
-
-                            switchMessage = null
-                        }
-                    }
-                }
-            }
-        }
-
-        if (showAccounts) {
-
-            AccountManagerSheet(
-                accounts = accounts,
-                activeId = activeId,
-
-                onDismiss = {
-                    showAccounts = false
-                },
-
-                onSelect = { acc ->
-
-                    lifecycleScope.launch {
-
-                        repository.setActive(
-                            acc.id
-                        )
-
-                        showAccounts = false
-                    }
-                },
-
-                onAdd = { name ->
-
-                    lifecycleScope.launch {
-
-                        val newAcc =
-                            repository.addAccount(
-                                name
-                            )
-
-                        repository.setActive(
-                            newAcc.id
-                        )
-                    }
-                },
-
-                onRename = { acc, newName ->
-
-                    lifecycleScope.launch {
-
-                        repository.rename(
-                            acc.id,
-                            newName
-                        )
-                    }
-                },
-
-                onDelete = { acc ->
-
-                    lifecycleScope.launch {
-
-                        if (accounts.size <= 1) {
-
-                            Toast.makeText(
-                                context,
-                                "Cannot delete last account",
-                                Toast.LENGTH_SHORT
-                            ).show()
-
-                            return@launch
-                        }
-
-                        webViewCache[acc.id]?.let { wv ->
-
-                            try {
-                                wv.stopLoading()
-                            } catch (_: Exception) {
-                            }
-
-                            try {
-                                wv.destroy()
-                            } catch (_: Exception) {
-                            }
-
-                            webViewCache.remove(
-                                acc.id
-                            )
-                        }
-
-                        WebViewProfileManager
-                            .deleteProfileData(
-                                context,
-                                acc
-                            )
-
-                        repository.delete(
-                            acc.id
-                        )
-
-                        if (
-                            activeId ==
-                            acc.id
-                        ) {
-
-                            val remaining =
-                                repository
-                                    .accountsFlow
-                                    .first()
-
-                            remaining
-                                .firstOrNull()
-                                ?.let {
-                                    repository
-                                        .setActive(
-               
+                                                Uri.parse

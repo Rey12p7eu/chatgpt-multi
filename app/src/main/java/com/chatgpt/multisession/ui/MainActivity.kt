@@ -1,4 +1,3 @@
-
 package com.chatgpt.multisession.ui
 
 import android.annotation.SuppressLint
@@ -43,38 +42,59 @@ class MainActivity : ComponentActivity() {
     private lateinit var downloadHandler: DownloadHandler
     private lateinit var permissionHandler: PermissionHandler
 
-    // WebView cache: LRU up to 3 active
+    // WebView cache: maksimal 3 akun aktif
     private val webViewCache = mutableMapOf<String, WebView>()
     private val MAX_CACHE = 3
 
-    // file chooser
+    // File chooser
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
-    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val uris = if (result.resultCode == RESULT_OK) {
-            result.data?.let { data ->
-                val clip = data.clipData
-                if (clip != null) {
-                    Array(clip.itemCount) { i -> clip.getItemAt(i).uri }
-                } else {
-                    data.data?.let { arrayOf(it) } ?: emptyArray()
-                }
-            } ?: emptyArray()
-        } else emptyArray()
-        filePathCallback?.onReceiveValue(uris)
-        filePathCallback = null
-    }
+
+    private val filePickerLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+
+            val uris = if (result.resultCode == RESULT_OK) {
+                result.data?.let { data ->
+                    val clip = data.clipData
+
+                    if (clip != null) {
+                        Array(clip.itemCount) { i ->
+                            clip.getItemAt(i).uri
+                        }
+                    } else {
+                        data.data?.let {
+                            arrayOf(it)
+                        } ?: emptyArray()
+                    }
+                } ?: emptyArray()
+            } else {
+                emptyArray()
+            }
+
+            filePathCallback?.onReceiveValue(uris)
+            filePathCallback = null
+        }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         val app = application as ChatGPTApp
+
         repository = AccountRepository(app.accountStorage)
         networkMonitor = NetworkMonitor(this)
         downloadHandler = DownloadHandler(this)
         permissionHandler = PermissionHandler(this)
 
         setContent {
-            MaterialTheme(colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            MaterialTheme(
+                colorScheme = if (
+                    androidx.compose.foundation.isSystemInDarkTheme()
+                ) {
+                    darkColorScheme()
+                } else {
+                    lightColorScheme()
+                }
+            ) {
                 MainScreen()
             }
         }
@@ -83,156 +103,396 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun MainScreen() {
-        val context = LocalContext.current
-        val accounts by repository.accountsFlow.collectAsState(initial = emptyList())
-        val activeId by repository.activeIdFlow.collectAsState(initial = null)
-        var showAccounts by remember { mutableStateOf(false) }
-        var switchMessage by remember { mutableStateOf<String?>(null) }
-        var isOffline by remember { mutableStateOf(false) }
-        var currentWebView by remember { mutableStateOf<WebView?>(null) }
-        val scope = rememberCoroutineScope()
 
-        // network
-        LaunchedEffect(Unit) {
-            networkMonitor.isOnline.collect { online -> isOffline = !online }
+        val context = LocalContext.current
+
+        val accounts by repository.accountsFlow.collectAsState(
+            initial = emptyList()
+        )
+
+        val activeId by repository.activeIdFlow.collectAsState(
+            initial = null
+        )
+
+        var showAccounts by remember {
+            mutableStateOf(false)
         }
 
-        // auto-create first account if none
+        var switchMessage by remember {
+            mutableStateOf<String?>(null)
+        }
+
+        var isOffline by remember {
+            mutableStateOf(false)
+        }
+
+        var currentWebView by remember {
+            mutableStateOf<WebView?>(null)
+        }
+
+        val scope = rememberCoroutineScope()
+
+        // Monitor jaringan
+        LaunchedEffect(Unit) {
+            networkMonitor.isOnline.collect { online ->
+                isOffline = !online
+            }
+        }
+
+        // Buat akun pertama otomatis
         LaunchedEffect(accounts) {
             if (accounts.isEmpty()) {
                 repository.addAccount("Personal")
             }
         }
 
-        val activeAccount = accounts.find { it.id == activeId } ?: accounts.firstOrNull()
+        val activeAccount =
+            accounts.find { it.id == activeId }
+                ?: accounts.firstOrNull()
 
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(activeAccount?.displayName ?: "ChatGPT Multi") },
+                    title = {
+                        Text(
+                            activeAccount?.displayName
+                                ?: "ChatGPT Multi"
+                        )
+                    },
+
                     navigationIcon = {
-                        IconButton(onClick = { showAccounts = true }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Accounts")
+                        IconButton(
+                            onClick = {
+                                showAccounts = true
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Menu,
+                                contentDescription = "Accounts"
+                            )
                         }
                     },
+
                     actions = {
-                        IconButton(onClick = { currentWebView?.reload() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Reload")
+
+                        IconButton(
+                            onClick = {
+                                currentWebView?.reload()
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Reload"
+                            )
                         }
-                        var menu by remember { mutableStateOf(false) }
-                        IconButton(onClick = { menu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More")
+
+                        var menu by remember {
+                            mutableStateOf(false)
                         }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(text = { Text("Open in browser") }, onClick = {
+
+                        IconButton(
+                            onClick = {
+                                menu = true
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "More"
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = menu,
+                            onDismissRequest = {
                                 menu = false
-                                currentWebView?.url?.let { url ->
-                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            }
+                        ) {
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text("Open in browser")
+                                },
+                                onClick = {
+
+                                    menu = false
+
+                                    currentWebView?.url?.let { url ->
+                                        startActivity(
+                                            Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse(url)
+                                            )
+                                        )
+                                    }
                                 }
-                            })
-                            DropdownMenuItem(text = { Text("Clear cache (active)") }, onClick = {
-                                menu = false
-                                currentWebView?.let { WebViewProfileManager.clearCacheOnly(it) }
-                                Toast.makeText(context, "Cache cleared", Toast.LENGTH_SHORT).show()
-                            })
-                            DropdownMenuItem(text = { Text("Clear session (active)") }, onClick = {
-                                menu = false
-                                currentWebView?.let { WebViewProfileManager.clearSessionForAccount(it) }
-                                currentWebView?.loadUrl("https://chatgpt.com/")
-                            })
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text("Clear cache (active)")
+                                },
+                                onClick = {
+
+                                    menu = false
+
+                                    currentWebView?.let {
+                                        WebViewProfileManager
+                                            .clearCacheOnly(it)
+                                    }
+
+                                    Toast.makeText(
+                                        context,
+                                        "Cache cleared",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text("Clear session (active)")
+                                },
+                                onClick = {
+
+                                    menu = false
+
+                                    currentWebView?.let {
+                                        WebViewProfileManager
+                                            .clearSessionForAccount(it)
+
+                                        it.loadUrl(
+                                            "https://chatgpt.com/"
+                                        )
+                                    }
+                                }
+                            )
                         }
                     }
                 )
             }
         ) { padding ->
 
-            Box(Modifier.fillMaxSize().padding(padding)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+
                 if (activeAccount != null) {
+
                     val account = activeAccount
-                    // Swipe container
+
                     SwipeAccountSwitcher(
                         modifier = Modifier.fillMaxSize(),
+
                         onSwipeLeft = {
-                            val idx = accounts.indexOf(account)
-                            if (idx >= 0 && accounts.size > 1) {
-                                val next = accounts[(idx + 1) % accounts.size]
+
+                            val idx =
+                                accounts.indexOf(account)
+
+                            if (
+                                idx >= 0 &&
+                                accounts.size > 1
+                            ) {
+
+                                val next =
+                                    accounts[
+                                        (idx + 1) %
+                                            accounts.size
+                                    ]
+
                                 scope.launch {
-                                    repository.setActive(next.id)
-                                    switchMessage = "Switched to: ${next.displayName}"
+
+                                    repository.setActive(
+                                        next.id
+                                    )
+
+                                    switchMessage =
+                                        "Switched to: ${next.displayName}"
                                 }
                             }
                         },
+
                         onSwipeRight = {
-                            val idx = accounts.indexOf(account)
-                            if (idx >= 0 && accounts.size > 1) {
-                                val prev = accounts[if (idx - 1 < 0) accounts.size - 1 else idx - 1]
+
+                            val idx =
+                                accounts.indexOf(account)
+
+                            if (
+                                idx >= 0 &&
+                                accounts.size > 1
+                            ) {
+
+                                val prev =
+                                    accounts[
+                                        if (idx - 1 < 0) {
+                                            accounts.size - 1
+                                        } else {
+                                            idx - 1
+                                        }
+                                    ]
+
                                 scope.launch {
-                                    repository.setActive(prev.id)
-                                    switchMessage = "Switched to: ${prev.displayName}"
+
+                                    repository.setActive(
+                                        prev.id
+                                    )
+
+                                    switchMessage =
+                                        "Switched to: ${prev.displayName}"
                                 }
                             }
                         }
                     ) {
-                        // WebView host
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { ctx ->
-                                // reuse or create
-                                getOrCreateWebView(ctx, account).also { wv ->
+
+                        // Penting:
+                        // hanya SATU AndroidView untuk satu WebView.
+                        key(account.id) {
+
+                            AndroidView(
+                                modifier =
+                                    Modifier.fillMaxSize(),
+
+                                factory = { ctx ->
+
+                                    getOrCreateWebView(
+                                        ctx,
+                                        account
+                                    ).also { wv ->
+
+                                        currentWebView = wv
+
+                                        if (
+                                            wv.url
+                                                .isNullOrEmpty()
+                                        ) {
+                                            wv.loadUrl(
+                                                "https://chatgpt.com/"
+                                            )
+                                        }
+                                    }
+                                },
+
+                                update = { wv ->
+
                                     currentWebView = wv
-                                    if (wv.url == null) {
-                                        wv.loadUrl("https://chatgpt.com/")
+
+                                    if (
+                                        wv.url
+                                            .isNullOrEmpty()
+                                    ) {
+                                        wv.loadUrl(
+                                            "https://chatgpt.com/"
+                                        )
                                     }
                                 }
-                            },
-                            update = { view ->
-                                // when account changes, swap webview reference
-                                if (view != getOrCreateWebView(context, account)) {
-                                    // handled by factory recreation via key
-                                }
-                                currentWebView = getOrCreateWebView(context, account)
-                            }
-                        )
-                    }
-
-                    // Use key to force recreation when active account changes
-                    key(account.id) {
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { ctx ->
-                                getOrCreateWebView(ctx, account).also { wv ->
-                                    currentWebView = wv
-                                    if (wv.url.isNullOrEmpty()) wv.loadUrl("https://chatgpt.com/")
-                                }
-                            }
-                        )
+                            )
+                        }
                     }
                 }
 
                 if (isOffline) {
+
                     Card(
-                        modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                        modifier = Modifier
+                            .align(
+                                androidx.compose.ui.Alignment
+                                    .BottomCenter
+                            )
+                            .padding(16.dp),
+
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .errorContainer
+                            )
                     ) {
-                        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Offline - check connection", color = MaterialTheme.colorScheme.onErrorContainer)
-                            TextButton(onClick = { currentWebView?.reload() }) { Text("Retry") }
+
+                        Row(
+                            modifier =
+                                Modifier.padding(12.dp),
+
+                            horizontalArrangement =
+                                Arrangement.spacedBy(
+                                    8.dp
+                                )
+                        ) {
+
+                            Text(
+                                text =
+                                    "Offline - check connection",
+
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onErrorContainer
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    currentWebView
+                                        ?.reload()
+                                }
+                            ) {
+                                Text("Retry")
+                            }
                         }
                     }
                 }
 
                 AnimatedVisibility(
-                    visible = switchMessage != null,
-                    enter = fadeIn() + slideInVertically(),
-                    exit = fadeOut() + slideOutVertically(),
-                    modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter).padding(top = 8.dp)
+                    visible =
+                        switchMessage != null,
+
+                    enter =
+                        fadeIn() +
+                            slideInVertically(),
+
+                    exit =
+                        fadeOut() +
+                            slideOutVertically(),
+
+                    modifier = Modifier
+                        .align(
+                            androidx.compose.ui.Alignment
+                                .TopCenter
+                        )
+                        .padding(top = 8.dp)
                 ) {
-                    switchMessage?.let {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-                            Text(it, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+
+                    switchMessage?.let { message ->
+
+                        Card(
+                            colors =
+                                CardDefaults.cardColors(
+                                    containerColor =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .secondaryContainer
+                                )
+                        ) {
+
+                            Text(
+                                text = message,
+
+                                modifier =
+                                    Modifier.padding(
+                                        horizontal =
+                                            16.dp,
+                                        vertical =
+                                            8.dp
+                                    )
+                            )
                         }
-                        LaunchedEffect(it) {
-                            kotlinx.coroutines.delay(1500)
+
+                        LaunchedEffect(message) {
+
+                            kotlinx.coroutines.delay(
+                                1500
+                            )
+
                             switchMessage = null
                         }
                     }
@@ -241,133 +501,108 @@ class MainActivity : ComponentActivity() {
         }
 
         if (showAccounts) {
+
             AccountManagerSheet(
                 accounts = accounts,
                 activeId = activeId,
-                onDismiss = { showAccounts = false },
+
+                onDismiss = {
+                    showAccounts = false
+                },
+
                 onSelect = { acc ->
+
                     lifecycleScope.launch {
-                        repository.setActive(acc.id)
+
+                        repository.setActive(
+                            acc.id
+                        )
+
                         showAccounts = false
                     }
                 },
+
                 onAdd = { name ->
+
                     lifecycleScope.launch {
-                        val newAcc = repository.addAccount(name)
-                        repository.setActive(newAcc.id)
+
+                        val newAcc =
+                            repository.addAccount(
+                                name
+                            )
+
+                        repository.setActive(
+                            newAcc.id
+                        )
                     }
                 },
+
                 onRename = { acc, newName ->
-                    lifecycleScope.launch { repository.rename(acc.id, newName) }
-                },
-                onDelete = { acc ->
+
                     lifecycleScope.launch {
-                        // confirm: if only one account, prevent delete? allow but recreate
+
+                        repository.rename(
+                            acc.id,
+                            newName
+                        )
+                    }
+                },
+
+                onDelete = { acc ->
+
+                    lifecycleScope.launch {
+
                         if (accounts.size <= 1) {
-                            Toast.makeText(context, "Cannot delete last account", Toast.LENGTH_SHORT).show()
+
+                            Toast.makeText(
+                                context,
+                                "Cannot delete last account",
+                                Toast.LENGTH_SHORT
+                            ).show()
+
                             return@launch
                         }
+
                         webViewCache[acc.id]?.let { wv ->
-                            wv.destroy()
-                            webViewCache.remove(acc.id)
+
+                            try {
+                                wv.stopLoading()
+                            } catch (_: Exception) {
+                            }
+
+                            try {
+                                wv.destroy()
+                            } catch (_: Exception) {
+                            }
+
+                            webViewCache.remove(
+                                acc.id
+                            )
                         }
-                        WebViewProfileManager.deleteProfileData(context, acc)
-                        repository.delete(acc.id)
-                        if (activeId == acc.id) {
-                            val remaining = repository.accountsFlow.first()
-                            remaining.firstOrNull()?.let { repository.setActive(it.id) }
-                        }
-                    }
-                },
-                onClearCache = { acc ->
-                    webViewCache[acc.id]?.let { WebViewProfileManager.clearCacheOnly(it) }
-                    Toast.makeText(context, "Cache cleared: ${acc.displayName}", Toast.LENGTH_SHORT).show()
-                },
-                onClearSession = { acc ->
-                    webViewCache[acc.id]?.let {
-                        WebViewProfileManager.clearSessionForAccount(it)
-                        it.loadUrl("https://chatgpt.com/")
-                    }
-                    Toast.makeText(context, "Session cleared: ${acc.displayName}", Toast.LENGTH_SHORT).show()
-                }
-            )
-        }
-    }
 
-    private fun getOrCreateWebView(context: android.content.Context, account: AccountProfile): WebView {
-        webViewCache[account.id]?.let { return it }
+                        WebViewProfileManager
+                            .deleteProfileData(
+                                context,
+                                acc
+                            )
 
-        // Evict oldest if over limit
-        if (webViewCache.size >= MAX_CACHE) {
-            val oldest = webViewCache.entries.minByOrNull { it.value.hashCode() }?.key
-            oldest?.let {
-                // don't destroy, just remove to keep profile, but destroy view to free RAM
-                // We keep it destroyed but profile persists
-                webViewCache[it]?.let { wv ->
-                    try { wv.onPause() } catch (_: Exception) {}
-                }
-                // Keep only MAX-1, remove one
-                if (webViewCache.size >= MAX_CACHE) {
-                    val toRemove = webViewCache.keys.first()
-                    webViewCache.remove(toRemove)
-                }
-            }
-        }
+                        repository.delete(
+                            acc.id
+                        )
 
-        val webView = WebViewProfileManager.createWebViewForAccount(context, account)
+                        if (
+                            activeId ==
+                            acc.id
+                        ) {
 
-        webView.webViewClient = ChatGPTWebViewClient(
-            onPageFinished = { _ -> lifecycleScope.launch { repository.updateLastUsed(account.id) } },
-            onRenderGone = {
-                // recover
-                try {
-                    webView.reload()
-                } catch (_: Exception) {}
-            }
-        )
+                            val remaining =
+                                repository
+                                    .accountsFlow
+                                    .first()
 
-        webView.webChromeClient = ChatGPTChromeClient(
-            activity = this,
-            permissionHandler = permissionHandler,
-            fileChooserLauncher = { callback, params ->
-                filePathCallback = callback
-                val intent = params.createIntent()
-                try {
-                    filePickerLauncher.launch(intent)
-                } catch (e: Exception) {
-                    // fallback file picker
-                    val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "*/*"
-                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.mode == android.webkit.WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE)
-                    }
-                    filePickerLauncher.launch(fallback)
-                }
-            }
-        )
-
-        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            downloadHandler.handleDownload(url, userAgent, contentDisposition, mimeType)
-        }
-
-        webViewCache[account.id] = webView
-        if (webView.url == null) webView.loadUrl("https://chatgpt.com/")
-        return webView
-    }
-
-    override fun onBackPressed() {
-        val activeId = runCatching { kotlinx.coroutines.runBlocking { repository.activeIdFlow.first() } }.getOrNull()
-        val wv = activeId?.let { webViewCache[it] }
-        if (wv?.canGoBack() == true) {
-            wv.goBack()
-        } else {
-            super.onBackPressed()
-        }
-    }
-
-    override fun onDestroy() {
-        // Don't destroy cache aggressively; let system handle. Pause all.
-        webViewCache.values.forEach { try { it.onPause() } catch (_: Exception) {} }
-        super.onDestroy()
-    }
-}
+                            remaining
+                                .firstOrNull()
+                                ?.let {
+                                    repository
+                                        .setActive(
+               

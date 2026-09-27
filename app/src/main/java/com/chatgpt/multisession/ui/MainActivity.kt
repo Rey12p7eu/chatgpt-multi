@@ -1,11 +1,10 @@
-
 package com.chatgpt.multisession.ui
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -65,7 +64,6 @@ import com.chatgpt.multisession.webview.ChatGPTWebViewClient
 import com.chatgpt.multisession.webview.WebViewProfileManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
 
@@ -75,35 +73,39 @@ class MainActivity : ComponentActivity() {
     private lateinit var permissionHandler: PermissionHandler
 
     private val webViewCache = mutableMapOf<String, WebView>()
-    private val maxCache = 3
+    private val MAX_CACHE = 3
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     private val filePickerLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
 
-            val uris: Array<Uri> =
-                if (result.resultCode == RESULT_OK) {
-                    val data = result.data
+            val uris = if (result.resultCode == RESULT_OK) {
+                result.data?.let { data ->
 
-                    if (data?.clipData != null) {
-                        val clipData = data.clipData!!
-                        Array(clipData.itemCount) { index ->
-                            clipData.getItemAt(index).uri
+                    val clip = data.clipData
+
+                    if (clip != null) {
+                        Array(clip.itemCount) { i ->
+                            clip.getItemAt(i).uri
                         }
-                    } else if (data?.data != null) {
-                        arrayOf(data.data!!)
                     } else {
-                        emptyArray()
+                        data.data?.let {
+                            arrayOf(it)
+                        } ?: emptyArray()
                     }
-                } else {
-                    emptyArray()
-                }
+                } ?: emptyArray()
+            } else {
+                emptyArray()
+            }
 
             filePathCallback?.onReceiveValue(uris)
             filePathCallback = null
         }
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -130,7 +132,7 @@ class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun MainScreen() {
+    fun MainScreen() {
 
         val context = LocalContext.current
 
@@ -178,6 +180,7 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             topBar = {
+
                 TopAppBar(
                     title = {
                         Text(
@@ -185,6 +188,7 @@ class MainActivity : ComponentActivity() {
                                 ?: "ChatGPT Multi"
                         )
                     },
+
                     navigationIcon = {
                         IconButton(
                             onClick = {
@@ -192,11 +196,12 @@ class MainActivity : ComponentActivity() {
                             }
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Menu,
+                                Icons.Default.Menu,
                                 contentDescription = "Accounts"
                             )
                         }
                     },
+
                     actions = {
 
                         IconButton(
@@ -205,30 +210,30 @@ class MainActivity : ComponentActivity() {
                             }
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Refresh,
+                                Icons.Default.Refresh,
                                 contentDescription = "Reload"
                             )
                         }
 
-                        var menuExpanded by remember {
+                        var menu by remember {
                             mutableStateOf(false)
                         }
 
                         IconButton(
                             onClick = {
-                                menuExpanded = true
+                                menu = true
                             }
                         ) {
                             Icon(
-                                imageVector = Icons.Default.MoreVert,
+                                Icons.Default.MoreVert,
                                 contentDescription = "More"
                             )
                         }
 
                         DropdownMenu(
-                            expanded = menuExpanded,
+                            expanded = menu,
                             onDismissRequest = {
-                                menuExpanded = false
+                                menu = false
                             }
                         ) {
 
@@ -237,10 +242,640 @@ class MainActivity : ComponentActivity() {
                                     Text("Open in browser")
                                 },
                                 onClick = {
-                                    menuExpanded = false
+
+                                    menu = false
 
                                     currentWebView?.url?.let { url ->
                                         startActivity(
                                             Intent(
                                                 Intent.ACTION_VIEW,
-                                                Uri.parse
+                                                Uri.parse(url)
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text("Clear cache (active)")
+                                },
+                                onClick = {
+
+                                    menu = false
+
+                                    currentWebView?.let {
+                                        WebViewProfileManager.clearCacheOnly(it)
+                                    }
+
+                                    Toast.makeText(
+                                        context,
+                                        "Cache cleared",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text("Clear session (active)")
+                                },
+                                onClick = {
+
+                                    menu = false
+
+                                    currentWebView?.let {
+                                        WebViewProfileManager
+                                            .clearSessionForAccount(it)
+
+                                        it.loadUrl(
+                                            "https://chatgpt.com/"
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                )
+            }
+        ) { padding ->
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+
+                if (activeAccount != null) {
+
+                    val account = activeAccount
+
+                    SwipeAccountSwitcher(
+                        modifier = Modifier.fillMaxSize(),
+
+                        onSwipeLeft = {
+
+                            val idx =
+                                accounts.indexOf(account)
+
+                            if (
+                                idx >= 0 &&
+                                accounts.size > 1
+                            ) {
+
+                                val next =
+                                    accounts[
+                                        (idx + 1) % accounts.size
+                                    ]
+
+                                scope.launch {
+
+                                    repository.setActive(
+                                        next.id
+                                    )
+
+                                    switchMessage =
+                                        "Switched to: ${next.displayName}"
+                                }
+                            }
+                        },
+
+                        onSwipeRight = {
+
+                            val idx =
+                                accounts.indexOf(account)
+
+                            if (
+                                idx >= 0 &&
+                                accounts.size > 1
+                            ) {
+
+                                val prev =
+                                    accounts[
+                                        if (idx - 1 < 0) {
+                                            accounts.size - 1
+                                        } else {
+                                            idx - 1
+                                        }
+                                    ]
+
+                                scope.launch {
+
+                                    repository.setActive(
+                                        prev.id
+                                    )
+
+                                    switchMessage =
+                                        "Switched to: ${prev.displayName}"
+                                }
+                            }
+                        }
+                    ) {
+
+                        key(account.id) {
+
+                            AndroidView(
+                                modifier =
+                                    Modifier.fillMaxSize(),
+
+                                factory = { ctx ->
+
+                                    val webView =
+                                        getOrCreateWebView(
+                                            ctx,
+                                            account
+                                        )
+
+                                    currentWebView =
+                                        webView
+
+                                    if (
+                                        webView.url
+                                            .isNullOrEmpty()
+                                    ) {
+                                        webView.loadUrl(
+                                            "https://chatgpt.com/"
+                                        )
+                                    }
+
+                                    webView
+                                },
+
+                                update = { webView ->
+                                    currentWebView =
+                                        webView
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (isOffline) {
+
+                    Card(
+                        modifier = Modifier
+                            .align(
+                                Alignment.BottomCenter
+                            )
+                            .padding(16.dp),
+
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .errorContainer
+                            )
+                    ) {
+
+                        Row(
+                            modifier =
+                                Modifier.padding(12.dp),
+
+                            horizontalArrangement =
+                                Arrangement.spacedBy(
+                                    8.dp
+                                )
+                        ) {
+
+                            Text(
+                                text =
+                                    "Offline - check connection",
+
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onErrorContainer
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    currentWebView
+                                        ?.reload()
+                                }
+                            ) {
+                                Text("Retry")
+                            }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible =
+                        switchMessage != null,
+
+                    enter =
+                        fadeIn() +
+                            slideInVertically(),
+
+                    exit =
+                        fadeOut() +
+                            slideOutVertically(),
+
+                    modifier = Modifier
+                        .align(
+                            Alignment.TopCenter
+                        )
+                        .padding(top = 8.dp)
+                ) {
+
+                    switchMessage?.let {
+
+                        Card(
+                            colors =
+                                CardDefaults.cardColors(
+                                    containerColor =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .secondaryContainer
+                                )
+                        ) {
+
+                            Text(
+                                it,
+                                modifier =
+                                    Modifier.padding(
+                                        horizontal =
+                                            16.dp,
+                                        vertical =
+                                            8.dp
+                                    )
+                            )
+                        }
+
+                        LaunchedEffect(it) {
+
+                            kotlinx.coroutines.delay(
+                                1500
+                            )
+
+                            switchMessage =
+                                null
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showAccounts) {
+
+            AccountManagerSheet(
+                accounts = accounts,
+                activeId = activeId,
+
+                onDismiss = {
+                    showAccounts = false
+                },
+
+                onSelect = { acc ->
+
+                    lifecycleScope.launch {
+
+                        repository.setActive(
+                            acc.id
+                        )
+
+                        showAccounts =
+                            false
+                    }
+                },
+
+                onAdd = { name ->
+
+                    lifecycleScope.launch {
+
+                        val newAcc =
+                            repository.addAccount(
+                                name
+                            )
+
+                        repository.setActive(
+                            newAcc.id
+                        )
+                    }
+                },
+
+                onRename = { acc, newName ->
+
+                    lifecycleScope.launch {
+
+                        repository.rename(
+                            acc.id,
+                            newName
+                        )
+                    }
+                },
+
+                onDelete = { acc ->
+
+                    lifecycleScope.launch {
+
+                        if (accounts.size <= 1) {
+
+                            Toast.makeText(
+                                context,
+                                "Cannot delete last account",
+                                Toast.LENGTH_SHORT
+                            ).show()
+
+                            return@launch
+                        }
+
+                        webViewCache[acc.id]
+                            ?.let { wv ->
+
+                                try {
+                                    wv.destroy()
+                                } catch (_: Exception) {
+                                }
+
+                                webViewCache
+                                    .remove(acc.id)
+                            }
+
+                        WebViewProfileManager
+                            .deleteProfileData(
+                                context,
+                                acc
+                            )
+
+                        repository.delete(
+                            acc.id
+                        )
+
+                        if (
+                            activeId ==
+                            acc.id
+                        ) {
+
+                            val remaining =
+                                repository
+                                    .accountsFlow
+                                    .first()
+
+                            remaining
+                                .firstOrNull()
+                                ?.let {
+
+                                    repository
+                                        .setActive(
+                                            it.id
+                                        )
+                                }
+                        }
+                    }
+                },
+
+                onClearCache = { acc ->
+
+                    webViewCache[acc.id]
+                        ?.let {
+
+                            WebViewProfileManager
+                                .clearCacheOnly(
+                                    it
+                                )
+                        }
+
+                    Toast.makeText(
+                        context,
+                        "Cache cleared: ${acc.displayName}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                },
+
+                onClearSession = { acc ->
+
+                    webViewCache[acc.id]
+                        ?.let {
+
+                            WebViewProfileManager
+                                .clearSessionForAccount(
+                                    it
+                                )
+
+                            it.loadUrl(
+                                "https://chatgpt.com/"
+                            )
+                        }
+
+                    Toast.makeText(
+                        context,
+                        "Session cleared: ${acc.displayName}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            )
+        }
+    }
+
+    private fun getOrCreateWebView(
+        context: android.content.Context,
+        account: AccountProfile
+    ): WebView {
+
+        webViewCache[account.id]
+            ?.let {
+                return it
+            }
+
+        if (
+            webViewCache.size >=
+            MAX_CACHE
+        ) {
+
+            val toRemove =
+                webViewCache
+                    .keys
+                    .firstOrNull()
+
+            if (toRemove != null) {
+
+                val oldWebView =
+                    webViewCache
+                        .remove(toRemove)
+
+                oldWebView?.let {
+
+                    try {
+                        it.stopLoading()
+                    } catch (_: Exception) {
+                    }
+
+                    try {
+                        it.onPause()
+                    } catch (_: Exception) {
+                    }
+
+                    try {
+                        it.destroy()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        }
+
+        val webView =
+            WebViewProfileManager
+                .createWebViewForAccount(
+                    context,
+                    account
+                )
+
+        webView.webViewClient =
+            ChatGPTWebViewClient(
+
+                onPageFinished = { _ ->
+
+                    lifecycleScope.launch {
+
+                        repository
+                            .updateLastUsed(
+                                account.id
+                            )
+                    }
+                },
+
+                onRenderGone = {
+
+                    try {
+
+                        webView.reload()
+
+                    } catch (_: Exception) {
+                    }
+                }
+            )
+
+        webView.webChromeClient =
+            ChatGPTChromeClient(
+
+                activity = this,
+
+                permissionHandler =
+                    permissionHandler,
+
+                fileChooserLauncher = {
+                        callback,
+                        params ->
+
+                    filePathCallback =
+                        callback
+
+                    val intent =
+                        params.createIntent()
+
+                    try {
+
+                        filePickerLauncher
+                            .launch(intent)
+
+                    } catch (_: Exception) {
+
+                        val fallback =
+                            Intent(
+                                Intent.ACTION_GET_CONTENT
+                            ).apply {
+
+                                addCategory(
+                                    Intent.CATEGORY_OPENABLE
+                                )
+
+                                type =
+                                    "*/*"
+
+                                putExtra(
+                                    Intent.EXTRA_ALLOW_MULTIPLE,
+                                    params.mode ==
+                                        android.webkit
+                                            .WebChromeClient
+                                            .FileChooserParams
+                                            .MODE_OPEN_MULTIPLE
+                                )
+                            }
+
+                        filePickerLauncher
+                            .launch(fallback)
+                    }
+                }
+            )
+
+        webView.setDownloadListener {
+                url,
+                userAgent,
+                contentDisposition,
+                mimeType,
+                _ ->
+
+            downloadHandler
+                .handleDownload(
+                    url,
+                    userAgent,
+                    contentDisposition,
+                    mimeType
+                )
+        }
+
+        webViewCache[account.id] =
+            webView
+
+        if (
+            webView.url
+                .isNullOrEmpty()
+        ) {
+
+            webView.loadUrl(
+                "https://chatgpt.com/"
+            )
+        }
+
+        return webView
+    }
+
+    override fun onBackPressed() {
+
+        val activeId =
+            runCatching {
+
+                kotlinx.coroutines
+                    .runBlocking {
+
+                        repository
+                            .activeIdFlow
+                            .first()
+                    }
+            }.getOrNull()
+
+        val webView =
+            activeId?.let {
+                webViewCache[it]
+            }
+
+        if (
+            webView?.canGoBack() ==
+            true
+        ) {
+
+            webView.goBack()
+
+        } else {
+
+            super.onBackPressed()
+        }
+    }
+
+    override fun onDestroy() {
+
+        webViewCache
+            .values
+            .forEach {
+
+                try {
+                    it.onPause()
+                } catch (_: Exception) {
+                }
+            }
+
+        super.onDestroy()
+    }
+}
